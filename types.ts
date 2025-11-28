@@ -1,3 +1,4 @@
+
 export interface Article {
   id: string;
   type: 'text' | 'url' | 'search';
@@ -45,4 +46,22 @@ export interface CachedBriefing {
   imageUrl: string | null;
   status: 'pending' | 'ready' | 'error';
   timestamp: number;
+}
+
+// Interface for History Items
+export interface HistoryItem {
+  id: string;
+  timestamp: number;
+  topic: string;
+  summary: string;
+  sources: GroundingSource[];
+  imageUrl: string | null;
+  audioBuffer: AudioBuffer;
+}
+
+declare global {
+  interface AIStudio {
+    hasSelectedApiKey: () => Promise<boolean>;
+    openSelectKey: () => Promise<void>;
+  }
 }

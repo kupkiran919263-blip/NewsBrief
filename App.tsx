@@ -1,10 +1,14 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Plus, Trash2, Play, Pause, Radio, Loader2, FileText, Download, ArrowRight, Link as LinkIcon, ExternalLink, Settings, Gauge, Search, Newspaper, Sparkles, Globe, Mic, Cpu, Briefcase, Beaker, Heart, Trophy, Film, CheckCircle2 } from 'lucide-react';
-import { Article, AppState, VoiceName, GroundingSource, Language, VoiceGender, LANGUAGES, CachedBriefing } from './types';
+import { Plus, Trash2, Play, Pause, Radio, Loader2, FileText, Download, ArrowRight, Link as LinkIcon, ExternalLink, Settings, Gauge, Search, Newspaper, Sparkles, Globe, Mic, Cpu, Briefcase, Beaker, Heart, Trophy, Film, CheckCircle2, History, X, Clock, LogIn, ShieldCheck } from 'lucide-react';
+import { Article, AppState, VoiceName, GroundingSource, Language, VoiceGender, LANGUAGES, CachedBriefing, HistoryItem } from './types';
 import { generateBriefingScript, generateSpeech, generateCoverImage } from './services/gemini';
 import { getAudioContext, createWavBlob } from './services/audioUtils';
 
 export default function App() {
+  // Auth State
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+
+  // App State
   const [articles, setArticles] = useState<Article[]>([
     { id: '1', type: 'search', content: '' }
   ]);
@@ -23,6 +27,10 @@ export default function App() {
   // Background Cache State
   const [cache, setCache] = useState<Record<string, CachedBriefing>>({});
 
+  // History State
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+
   // Audio Refs
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
@@ -33,33 +41,77 @@ export default function App() {
   const segmentStartTimeRef = useRef<number>(0);
 
   const QUICK_CATEGORIES = [
-    { id: 'tech', label: 'Tech', icon: Cpu, color: 'from-blue-500 to-cyan-400' },
-    { id: 'biz', label: 'Business', icon: Briefcase, color: 'from-emerald-500 to-teal-400' },
-    { id: 'science', label: 'Science', icon: Beaker, color: 'from-purple-500 to-pink-400' },
-    { id: 'health', label: 'Health', icon: Heart, color: 'from-rose-500 to-red-400' },
-    { id: 'sports', label: 'Sports', icon: Trophy, color: 'from-amber-500 to-orange-400' },
-    { id: 'entertainment', label: 'Cinema', icon: Film, color: 'from-violet-500 to-fuchsia-400' },
+    { 
+      id: 'tech', 
+      label: 'Tech', 
+      image: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=500&auto=format&fit=crop&q=60',
+      icon: Cpu, 
+      color: 'from-blue-500 to-cyan-400' 
+    },
+    { 
+      id: 'biz', 
+      label: 'Business', 
+      image: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=500&auto=format&fit=crop&q=60',
+      icon: Briefcase, 
+      color: 'from-emerald-500 to-teal-400' 
+    },
+    { 
+      id: 'science', 
+      label: 'Science', 
+      image: 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?w=500&auto=format&fit=crop&q=60',
+      icon: Beaker, 
+      color: 'from-purple-500 to-pink-400' 
+    },
+    { 
+      id: 'health', 
+      label: 'Health', 
+      image: 'https://images.unsplash.com/photo-1505751172876-fa1923c5c528?w=500&auto=format&fit=crop&q=60',
+      icon: Heart, 
+      color: 'from-rose-500 to-red-400' 
+    },
+    { 
+      id: 'sports', 
+      label: 'Sports', 
+      image: 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=500&auto=format&fit=crop&q=60',
+      icon: Trophy, 
+      color: 'from-amber-500 to-orange-400' 
+    },
+    { 
+      id: 'entertainment', 
+      label: 'Cinema', 
+      image: 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&auto=format&fit=crop&q=60',
+      icon: Film, 
+      color: 'from-violet-500 to-fuchsia-400' 
+    },
   ];
 
-  // Helper to init audio context safely
-  const initAudio = () => {
-    const ctx = getAudioContext();
-    audioContextRef.current = ctx;
-  };
-
-  // Map gender to specific Gemini voice
-  const getVoiceForGender = (gender: VoiceGender): VoiceName => {
-      // Mapping: Female -> Kore, Male -> Puck
-      return gender === 'Female' ? VoiceName.Kore : VoiceName.Puck;
-  };
-
-  // Background Pre-fetching Logic
+  // Auth Check Effect
   useEffect(() => {
-    // Only start pre-fetching once on mount if idle
+    const checkAuth = async () => {
+      try {
+        // If window.aistudio exists (AI Studio environment), use it
+        if (window.aistudio) {
+          const hasKey = await window.aistudio.hasSelectedApiKey();
+          setIsAuthenticated(hasKey);
+        } else {
+          // Fallback for development/other environments: check if key is in env
+          setIsAuthenticated(!!process.env.API_KEY);
+        }
+      } catch (e) {
+        console.error("Auth check failed", e);
+        setIsAuthenticated(false);
+      }
+    };
+    checkAuth();
+  }, []);
+
+  // Background Pre-fetching Logic (Optimized for Speed) - Only runs when authenticated
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
     const startPreFetching = async () => {
       
       QUICK_CATEGORIES.forEach(async (cat) => {
-         // Initialize cache entry as pending
          setCache(prev => ({
              ...prev,
              [cat.label]: { 
@@ -77,29 +129,40 @@ export default function App() {
              // 1. Generate Script
              const topic = `Top 5 recent ${cat.label} headlines`;
              const dummyArticle: Article = { id: 'bg', type: 'search', content: topic };
-             const result = await generateBriefingScript([dummyArticle], 'English'); // Default to English for background
+             const result = await generateBriefingScript([dummyArticle], 'English'); 
 
-             // 2. Generate Assets (Audio/Image) in parallel
-             // Use default Female voice (Kore) for background cache to keep it simple, 
-             // or ideally we re-generate if user switches gender. For now, assume default.
+             // 2. Start Asset Generation in Parallel
              const voiceName = getVoiceForGender('Female'); 
-             const [buffer, img] = await Promise.all([
-                 generateSpeech(result.script, voiceName),
-                 generateCoverImage(result.script)
-             ]);
+             const audioPromise = generateSpeech(result.script, voiceName);
+             const imagePromise = generateCoverImage(result.script);
+
+             // 3. OPTIMIZATION: Wait for Audio ONLY to mark as ready
+             // This makes the card clickable much faster
+             const buffer = await audioPromise;
 
              setCache(prev => ({
                  ...prev,
                  [cat.label]: {
                      id: cat.label,
-                     status: 'ready',
+                     status: 'ready', // It's ready to play!
                      summary: result.script,
                      sources: result.sources,
                      audioBuffer: buffer,
-                     imageUrl: img,
+                     imageUrl: null, // Image might not be ready yet
                      timestamp: Date.now()
                  }
              }));
+
+             // 4. Update with Image when it arrives
+             imagePromise.then(img => {
+                 setCache(prev => ({
+                    ...prev,
+                    [cat.label]: {
+                        ...prev[cat.label],
+                        imageUrl: img
+                    }
+                 }));
+             });
 
          } catch (error) {
              console.error(`Background fetch failed for ${cat.label}`, error);
@@ -112,7 +175,72 @@ export default function App() {
     };
 
     startPreFetching();
-  }, []); // Run once on mount
+  }, [isAuthenticated]); 
+
+  // Helper to init audio context safely
+  const initAudio = () => {
+    const ctx = getAudioContext();
+    audioContextRef.current = ctx;
+  };
+
+  // Map gender to specific Gemini voice
+  const getVoiceForGender = (gender: VoiceGender): VoiceName => {
+      // Mapping: Female -> Kore, Male -> Puck
+      return gender === 'Female' ? VoiceName.Kore : VoiceName.Puck;
+  };
+
+  const handleLogin = async () => {
+      if (window.aistudio) {
+          try {
+              await window.aistudio.openSelectKey();
+              const hasKey = await window.aistudio.hasSelectedApiKey();
+              setIsAuthenticated(hasKey);
+          } catch (e) {
+              console.error("Login failed", e);
+          }
+      } else {
+          // Fallback or alert if not in supported env
+          alert("Login is only supported in the Gemini AI Studio environment.");
+      }
+  };
+
+  const addToHistory = (item: HistoryItem) => {
+    setHistory(prev => {
+        // Prevent generic/duplicate IDs if rapid clicking
+        const exists = prev.find(i => i.id === item.id);
+        if (exists) return prev;
+        return [item, ...prev];
+    });
+  };
+
+  const loadHistoryItem = (item: HistoryItem) => {
+      // Pause current if playing
+      if (appState === AppState.PLAYING) {
+        pauseAudio();
+      }
+
+      // Resume context
+      const ctx = getAudioContext();
+      if (ctx.state === 'suspended') ctx.resume();
+      initAudio();
+
+      setSummary(item.summary);
+      setSources(item.sources);
+      setImageUrl(item.imageUrl);
+      audioBufferRef.current = item.audioBuffer;
+      savedBufferOffsetRef.current = 0;
+      
+      // Update inputs to reflect
+      setArticles([{ id: 'history', type: 'search', content: item.topic }]);
+      
+      setAppState(AppState.READY);
+      setShowHistory(false);
+  };
+
+  const deleteHistoryItem = (e: React.MouseEvent, id: string) => {
+      e.stopPropagation();
+      setHistory(prev => prev.filter(i => i.id !== id));
+  };
 
   const addArticle = () => {
     setArticles(prev => [
@@ -129,7 +257,7 @@ export default function App() {
     setArticles(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
   };
 
-  // Standard Manual Generation
+  // Standard Manual Generation (Optimized: Non-blocking Image)
   const performGeneration = async (targetArticles: Article[]) => {
     const ctx = getAudioContext();
     if (ctx.state === 'suspended') {
@@ -157,20 +285,34 @@ export default function App() {
 
       setAppState(AppState.SYNTHESIZING);
 
-      // 2. Parallel: Generate Audio AND Image
+      // 2. Start both generations
       const voiceName = getVoiceForGender(selectedGender);
-      
       const audioPromise = generateSpeech(result.script, voiceName);
       const imagePromise = generateCoverImage(result.script);
 
-      const [buffer, generatedImage] = await Promise.all([audioPromise, imagePromise]);
-      
+      // 3. Wait ONLY for Audio to enable playback
+      // This is the key speed optimization
+      const buffer = await audioPromise;
       audioBufferRef.current = buffer;
-      setImageUrl(generatedImage);
-
-      // Reset audio state
       savedBufferOffsetRef.current = 0;
       setAppState(AppState.READY);
+
+      // 4. Handle Image when it arrives
+      imagePromise.then((generatedImage) => {
+          setImageUrl(generatedImage);
+          // Add to History once we have the image (or could add earlier with null)
+           const topic = validArticles.map(a => a.content).join(', ');
+           addToHistory({
+              id: Date.now().toString(),
+              timestamp: Date.now(),
+              topic: topic.length > 50 ? topic.substring(0, 50) + '...' : topic,
+              summary: result.script,
+              sources: result.sources,
+              imageUrl: generatedImage,
+              audioBuffer: buffer
+          });
+      });
+      
     } catch (err: any) {
       console.error(err);
       setErrorMessage(err.message || "Something went wrong while generating the briefing.");
@@ -184,44 +326,44 @@ export default function App() {
 
   // Optimized Category Selection with Cache
   const handleCategorySelect = async (categoryLabel: string) => {
-    // Check if we have a valid cache hit
     const cachedData = cache[categoryLabel];
 
-    // If Ready: Load instantly
+    // Check if Audio is ready (Image might still be null, which is fine)
     if (cachedData && cachedData.status === 'ready' && cachedData.audioBuffer) {
-        // We need to respect the *current* user settings. 
-        // NOTE: The background fetch uses default settings (English/Female). 
-        // If user changed language/gender, we might want to re-generate, 
-        // but for speed, we serve cached content first or we could invalidate.
-        // For this optimization request, speed is priority. We use cached data.
         
-        // Resume Audio Context
         const ctx = getAudioContext();
         if (ctx.state === 'suspended') await ctx.resume();
         initAudio();
 
         setSummary(cachedData.summary);
         setSources(cachedData.sources);
-        setImageUrl(cachedData.imageUrl);
+        setImageUrl(cachedData.imageUrl); // Might be null initially
         audioBufferRef.current = cachedData.audioBuffer;
         savedBufferOffsetRef.current = 0;
         
-        // Update articles to show what was selected
-        setArticles([{ id: 'cached', type: 'search', content: `Top 5 recent ${categoryLabel} headlines` }]);
+        const topic = `Top 5 recent ${categoryLabel} headlines`;
+        setArticles([{ id: 'cached', type: 'search', content: topic }]);
         
+        // Add to History
+        addToHistory({
+            id: `${categoryLabel}-${cachedData.timestamp}`,
+            timestamp: Date.now(),
+            topic: topic,
+            summary: cachedData.summary,
+            sources: cachedData.sources,
+            imageUrl: cachedData.imageUrl, // Will be null if clicked very fast
+            audioBuffer: cachedData.audioBuffer
+        });
+
         setAppState(AppState.READY);
         return;
     }
 
-    // If Pending: Show loading state specific to waiting for this cache
     if (cachedData && cachedData.status === 'pending') {
-        setAppState(AppState.SUMMARIZING); // Use generic loading state for now
-        // Poll or wait logic could be here, but effectively we just re-trigger standard generation 
-        // if user clicks while pending to ensure they get result.
-        // Or simpler: Fallback to standard generation which might duplicate effort but ensures result.
+        setAppState(AppState.SUMMARIZING); 
     }
 
-    // Fallback: Standard Generation
+    // Fallback
     const topic = `Top 5 recent ${categoryLabel} headlines`;
     const newArticle: Article = { id: Date.now().toString(), type: 'search', content: topic };
     setArticles([newArticle]);
@@ -326,8 +468,72 @@ export default function App() {
       savedBufferOffsetRef.current = 0;
   };
 
+  // Auth Loading
+  if (isAuthenticated === null) {
+      return (
+          <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+              <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+          </div>
+      );
+  }
+
+  // Auth Login Screen
+  if (!isAuthenticated) {
+      return (
+        <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 text-center font-sans">
+            <div className="max-w-md w-full space-y-8 animate-fade-in-up">
+                
+                <div className="flex flex-col items-center gap-6">
+                    <div className="relative">
+                        <div className="p-6 bg-gradient-to-br from-indigo-600 to-violet-700 rounded-3xl shadow-2xl shadow-indigo-500/30 z-10 relative">
+                            <Newspaper className="w-12 h-12 text-white" />
+                        </div>
+                        <div className="absolute -top-2 -right-2 bg-cyan-500 rounded-full p-2 border-4 border-slate-950 z-20">
+                            <Sparkles className="w-5 h-5 text-white" />
+                        </div>
+                    </div>
+                    
+                    <div className="space-y-2">
+                        <h1 className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white via-indigo-100 to-indigo-300 tracking-tight">
+                            NewsBrief AI
+                        </h1>
+                        <p className="text-slate-400 text-lg">Your personalized global intelligence anchor.</p>
+                    </div>
+                </div>
+
+                <div className="bg-slate-900/50 backdrop-blur-sm border border-slate-800 rounded-2xl p-8 shadow-xl">
+                    <div className="flex flex-col gap-4">
+                        <div className="flex items-center gap-3 text-slate-300 text-sm bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
+                            <ShieldCheck className="w-10 h-10 text-emerald-400 flex-shrink-0" />
+                            <p className="text-left">Securely connect your Google account to access Gemini's advanced news synthesis models.</p>
+                        </div>
+
+                        <button
+                            onClick={handleLogin}
+                            className="group relative w-full flex items-center justify-center gap-3 px-8 py-4 bg-white hover:bg-slate-50 text-slate-900 font-semibold rounded-xl transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5"
+                        >
+                            <LogIn className="w-5 h-5 text-indigo-600" />
+                            <span>Connect with Google</span>
+                        </button>
+                    </div>
+                    
+                    <p className="mt-6 text-xs text-slate-500">
+                        By connecting, you agree to use your own API key for generation.
+                        <br />
+                        <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline">
+                            Billing Information
+                        </a>
+                    </p>
+                </div>
+
+            </div>
+        </div>
+      );
+  }
+
+  // Main App
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 flex flex-col items-center font-sans">
+    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 flex flex-col items-center font-sans overflow-x-hidden">
       
       {/* Header */}
       <header className="w-full max-w-4xl flex flex-col md:flex-row items-center justify-between mb-8 gap-4">
@@ -396,6 +602,15 @@ export default function App() {
                Female
              </button>
            </div>
+
+           {/* History Toggle */}
+           <button 
+             onClick={() => setShowHistory(true)}
+             className="ml-1 p-2 bg-slate-800 rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+             title="View History"
+           >
+             <History className="w-4 h-4" />
+           </button>
         </div>
       </header>
 
@@ -428,20 +643,48 @@ export default function App() {
                         key={cat.id}
                         onClick={() => handleCategorySelect(cat.label)}
                         disabled={appState !== AppState.IDLE}
-                        className="group relative overflow-hidden bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 p-4 rounded-xl transition-all hover:-translate-y-1 hover:shadow-lg flex flex-col items-center justify-center gap-2"
+                        className={`group relative h-28 overflow-hidden rounded-xl transition-all border ${isPending ? 'border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.3)]' : 'border-slate-800 hover:-translate-y-1 hover:shadow-lg'}`}
                     >
-                        <div className={`relative p-2.5 rounded-full bg-gradient-to-br ${cat.color} opacity-80 group-hover:opacity-100 transition-opacity`}>
-                            <cat.icon className="w-5 h-5 text-white" />
-                            {isReady && (
-                                <div className="absolute -top-1 -right-1 bg-green-500 rounded-full p-0.5 border-2 border-slate-900">
-                                    <CheckCircle2 className="w-2.5 h-2.5 text-white" />
-                                </div>
-                            )}
-                            {isPending && (
-                                <div className="absolute inset-0 rounded-full border-2 border-white/50 border-t-transparent animate-spin"></div>
-                            )}
+                        {/* Background Image */}
+                        <img 
+                            src={cat.image} 
+                            alt={cat.label} 
+                            className={`absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 ${isPending ? 'opacity-30 scale-105' : 'opacity-50 group-hover:opacity-70'}`} 
+                        />
+                        
+                        {/* Gradient Overlay */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/50 to-transparent" />
+
+                        {/* Pending Progress Bar */}
+                        {isPending && (
+                           <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-slate-900/50">
+                               <div className="h-full bg-gradient-to-r from-indigo-500 to-cyan-400 animate-pulse w-full origin-left"></div>
+                           </div>
+                        )}
+
+                        {/* Content */}
+                        <div className="absolute inset-0 flex flex-col items-center justify-center z-10 p-2">
+                             
+                             {/* Status Indicators */}
+                             <div className="mb-1 h-6 flex items-center justify-center">
+                                 {isPending ? (
+                                    <div className="relative">
+                                        <div className="absolute inset-0 bg-indigo-500/30 blur-lg rounded-full animate-pulse"></div>
+                                        <Loader2 className="w-6 h-6 text-indigo-400 animate-spin drop-shadow-md relative z-10" />
+                                    </div>
+                                 ) : isReady ? (
+                                    <CheckCircle2 className="w-5 h-5 text-green-400 drop-shadow-md" />
+                                 ) : (
+                                    <cat.icon className="w-5 h-5 text-slate-300 group-hover:text-white drop-shadow-md transition-colors" />
+                                 )}
+                             </div>
+                             
+                             <span className="text-sm font-bold text-slate-100 drop-shadow-md tracking-wide group-hover:text-white transition-colors">{cat.label}</span>
+                             
+                             {isPending && (
+                                 <span className="text-[10px] text-indigo-200 font-medium tracking-wider mt-1 animate-pulse">PREPARING</span>
+                             )}
                         </div>
-                        <span className="text-xs font-semibold text-slate-300 group-hover:text-white">{cat.label}</span>
                     </button>
                 );
               })}
@@ -522,18 +765,24 @@ export default function App() {
         {(appState === AppState.READY || appState === AppState.PLAYING) && (
             <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-8 animate-fade-in-up">
                 
-                <div className="w-full h-48 bg-slate-900 rounded-2xl border border-slate-800 flex items-center justify-center relative overflow-hidden shadow-2xl shadow-indigo-500/10">
+                <div className="w-full h-48 bg-slate-900 rounded-2xl border border-slate-800 flex items-center justify-center relative overflow-hidden shadow-2xl shadow-indigo-500/10 group">
                     
                     {imageUrl ? (
                         <img 
                             src={imageUrl} 
                             alt="Generated News Illustration" 
-                            className="w-full h-full object-cover opacity-80"
+                            className="w-full h-full object-cover opacity-80 animate-fade-in"
                         />
                     ) : (
-                        <div className="flex flex-col items-center justify-center text-slate-600">
-                             <Newspaper className="w-12 h-12 mb-2 opacity-20" />
-                             <span className="text-xs uppercase tracking-widest opacity-40">Audio Only</span>
+                        <div className="flex flex-col items-center justify-center text-slate-600 relative">
+                             {/* Loading Indicator specific for Image */}
+                             <div className="absolute inset-0 flex items-center justify-center">
+                                <div className="p-4 rounded-full bg-slate-900/80 backdrop-blur-sm border border-slate-800 shadow-lg flex flex-col items-center gap-2">
+                                  <Loader2 className="w-6 h-6 text-indigo-400 animate-spin" />
+                                  <span className="text-[10px] text-indigo-300 font-medium tracking-widest uppercase">Loading Visuals</span>
+                                </div>
+                             </div>
+                             <Newspaper className="w-12 h-12 mb-2 opacity-10" />
                         </div>
                     )}
                     
@@ -631,6 +880,78 @@ export default function App() {
 
       </main>
       
+      {/* History Sidebar */}
+      {showHistory && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+            <div 
+                className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity"
+                onClick={() => setShowHistory(false)}
+            ></div>
+            <div className="relative w-full max-w-sm h-full bg-slate-900 border-l border-slate-800 shadow-2xl flex flex-col transform transition-transform animate-slide-in-right">
+                <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/95 backdrop-blur-md sticky top-0 z-10">
+                    <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                        <History className="w-5 h-5 text-indigo-400" />
+                        Briefing History
+                    </h2>
+                    <button 
+                        onClick={() => setShowHistory(false)}
+                        className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
+                    >
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {history.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-3">
+                            <Clock className="w-12 h-12 opacity-20" />
+                            <p className="text-sm">No history yet. Generate something!</p>
+                        </div>
+                    ) : (
+                        history.map(item => (
+                            <div 
+                                key={item.id} 
+                                onClick={() => loadHistoryItem(item)}
+                                className="group bg-slate-800/50 hover:bg-slate-800 border border-slate-700/50 hover:border-indigo-500/50 rounded-xl p-3 cursor-pointer transition-all flex gap-3 hover:shadow-lg hover:shadow-indigo-500/10"
+                            >
+                                <div className="w-16 h-16 rounded-lg bg-slate-900 overflow-hidden flex-shrink-0 border border-slate-700 group-hover:border-indigo-500/30">
+                                    {item.imageUrl ? (
+                                        <img src={item.imageUrl} alt="Thumbnail" className="w-full h-full object-cover" />
+                                    ) : (
+                                        <div className="w-full h-full flex items-center justify-center">
+                                            <Newspaper className="w-6 h-6 text-slate-600" />
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
+                                    <div>
+                                        <p className="text-xs text-indigo-400 font-medium mb-0.5">
+                                            {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        </p>
+                                        <h3 className="text-sm text-slate-200 font-medium truncate leading-tight group-hover:text-white transition-colors">
+                                            {item.topic}
+                                        </h3>
+                                    </div>
+                                    <div className="flex justify-between items-center mt-2">
+                                        <span className="text-[10px] text-slate-500 uppercase tracking-wide">
+                                            {item.sources.length} Sources
+                                        </span>
+                                        <button 
+                                            onClick={(e) => deleteHistoryItem(e, item.id)}
+                                            className="p-1.5 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                                        >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+        </div>
+      )}
+
       <footer className="mt-auto py-8 text-center text-slate-600 text-xs font-medium">
         <p>Powered by Gemini 2.5 Flash & TTS</p>
       </footer>
