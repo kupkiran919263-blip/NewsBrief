@@ -1,0 +1,14 @@
+{
+  "appId": "com.newsbrief.ai",
+  "appName": "NewsBrief AI",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 0
+    }
+  }
+}

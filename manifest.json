@@ -1,0 +1,21 @@
+{
+  "name": "NewsBrief AI",
+  "short_name": "NewsBrief",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "https://unpkg.com/lucide-static@0.344.0/icons/newspaper.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192"
+    },
+    {
+      "src": "https://unpkg.com/lucide-static@0.344.0/icons/newspaper.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512"
+    }
+  ]
+}
